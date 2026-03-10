@@ -1,5 +1,3 @@
-from starlette.middleware.trustedhost import TrustedHostMiddleware
-
 import contextlib
 from starlette.applications import Starlette
 from starlette.routing import Mount
@@ -83,23 +81,30 @@ def normalize_value_case_intake(payload: dict) -> dict:
 # -----------------------------
 # Mount MCP at /mcp (Streamable HTTP)
 # -----------------------------
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+# Create the MCP streamable HTTP ASGI app
+inner_app = mcp.streamable_http_app()
+
+# Apply TrustedHostMiddleware to the INNER app (most important)
+inner_app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["*"],  # V1: allow all hosts to avoid Render host/header issues
+)
+
 @contextlib.asynccontextmanager
 async def lifespan(app: Starlette):
     async with mcp.session_manager.run():
         yield
 
-# By default, streamable HTTP is exposed at /mcp
+# Wrap with Starlette only to manage lifespan/session
 app = Starlette(
-    routes=[Mount("/", app=mcp.streamable_http_app())],
+    routes=[Mount("/", app=inner_app)],
     lifespan=lifespan,
 )
 
+# Also apply to OUTER app (belt-and-suspenders)
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=[
-        "v1-mcp-server.onrender.com",
-        "*.onrender.com",
-        "localhost",
-        "127.0.0.1",
-    ],
+    allowed_hosts=["*"],
 )
