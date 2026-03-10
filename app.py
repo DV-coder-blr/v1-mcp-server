@@ -56,7 +56,12 @@ _validator = Draft202012Validator(INPUT_SCHEMA)
 # MCP server (real MCP protocol)
 # -----------------------------
 # json_response=True makes MCP responses JSON (good for web clients)
-mcp = FastMCP("ValueCase V1", json_response=True)
+mcp = FastMCP(
+    "ValueCase V1",
+    json_response=True,
+    stateless_http=True,
+    streamable_http_path="/",   # key fix: serve at mount root
+)
 
 @mcp.tool(name="normalize_value_case_intake")
 def normalize_value_case_intake(payload: dict) -> dict:
@@ -130,9 +135,10 @@ async def lifespan(app: Starlette):
 app = Starlette(
     routes=[
         Route("/ping", ping),
-        Mount("/mcp/", app=inner_app),
+        Mount("/mcp", app=inner_app),
+        Mount("/mcp/", app=inner_app),  # keep both so browser/clients don’t break
     ],
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Make host checks fully permissive for V1
