@@ -1,3 +1,5 @@
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+
 import contextlib
 from starlette.applications import Starlette
 from starlette.routing import Mount
@@ -90,4 +92,14 @@ async def lifespan(app: Starlette):
 app = Starlette(
     routes=[Mount("/", app=mcp.streamable_http_app())],
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=[
+        "v1-mcp-server.onrender.com",
+        "*.onrender.com",
+        "localhost",
+        "127.0.0.1",
+    ],
 )
