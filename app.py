@@ -130,10 +130,9 @@ async def lifespan(app: Starlette):
 app = Starlette(
     routes=[
         Route("/ping", ping),
-        Mount("/mcp", app=inner_app),
+        Mount("/mcp/", app=inner_app),
     ],
-    lifespan=lifespan,
-    redirect_slashes=True,
+    lifespan=lifespan
 )
 
 # Make host checks fully permissive for V1
