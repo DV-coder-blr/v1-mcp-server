@@ -1,0 +1,35 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["client", "use_case", "currency", "assumptions"],
+  "properties": {
+    "client": { "type": "string", "minLength": 1 },
+    "use_case": { "type": "string", "minLength": 1 },
+    "currency": { "type": "string", "enum": ["USD", "EUR", "GBP", "INR"] },
+    "assumptions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["assumption_id", "name", "value", "units", "scenario", "source"],
+        "properties": {
+          "assumption_id": { "type": "string", "pattern": "^A[0-9]{3}$" },
+          "name": { "type": "string", "minLength": 1 },
+          "value": { "type": "number" },
+          "units": { "type": "string", "minLength": 1 },
+          "scenario": { "type": "string", "enum": ["Base", "Conservative", "Aggressive"] },
+          "source": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "reference"],
+            "properties": {
+              "type": { "type": "string", "enum": ["internal", "public_report", "benchmark", "expert_judgment"] },
+              "reference": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    }
+  }
+}
