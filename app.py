@@ -1,14 +1,16 @@
 import contextlib
-from starlette.applications import Starlette
-from starlette.routing import Mount
 
 from jsonschema import Draft202012Validator
-
 from mcp.server.fastmcp import FastMCP
+
+from starlette.applications import Starlette
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.responses import PlainTextResponse
+from starlette.routing import Mount, Route
 
 
 # -----------------------------
-# Your existing tool schema
+# V1: Strict input schema
 # -----------------------------
 INPUT_SCHEMA = {
     "type": "object",
@@ -24,13 +26,23 @@ INPUT_SCHEMA = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["assumption_id", "name", "value", "units", "scenario", "source"],
+                "required": [
+                    "assumption_id",
+                    "name",
+                    "value",
+                    "units",
+                    "scenario",
+                    "source",
+                ],
                 "properties": {
                     "assumption_id": {"type": "string", "pattern": r"^A[0-9]{3}$"},
                     "name": {"type": "string", "minLength": 1},
                     "value": {"type": "number"},
                     "units": {"type": "string", "minLength": 1},
-                    "scenario": {"type": "string", "enum": ["Base", "Conservative", "Aggressive"]},
+                    "scenario": {
+                        "type": "string",
+                        "enum": ["Base", "Conservative", "Aggressive"],
+                    },
                     "source": {
                         "type": "object",
                         "additionalProperties": False,
@@ -38,7 +50,12 @@ INPUT_SCHEMA = {
                         "properties": {
                             "type": {
                                 "type": "string",
-                                "enum": ["internal", "public_report", "benchmark", "expert_judgment"],
+                                "enum": [
+                                    "internal",
+                                    "public_report",
+                                    "benchmark",
+                                    "expert_judgment",
+                                ],
                             },
                             "reference": {"type": "string", "minLength": 1},
                         },
@@ -53,97 +70,65 @@ _validator = Draft202012Validator(INPUT_SCHEMA)
 
 
 # -----------------------------
-# MCP server (real MCP protocol)
+# MCP Server (Streamable HTTP)
 # -----------------------------
-# json_response=True makes MCP responses JSON (good for web clients)
+# IMPORTANT:
+# - streamable_http_path="/" makes MCP endpoints live at the ROOT of the mount.
+#   So mounting at /mcp means the MCP endpoint is /mcp (not /mcp/mcp).
 mcp = FastMCP(
     "ValueCase V1",
     json_response=True,
     stateless_http=True,
-    streamable_http_path="/",   # key fix: serve at mount root
+    streamable_http_path="/",
 )
+
 
 @mcp.tool(name="normalize_value_case_intake")
 def normalize_value_case_intake(payload: dict) -> dict:
     """
-    Validates tool args strictly against JSON Schema (V1 validation).
-    Returns qa_status PASS/FAIL plus either normalized payload or error detail.
+    V1 validation tool: strictly validates payload against JSON Schema.
     """
     errors = sorted(_validator.iter_errors(payload), key=lambda e: e.path)
     if errors:
-        # deterministic FAIL structure for V1
+        e0 = errors[0]
         return {
             "qa_status": "FAIL",
             "error": "schema_validation_error",
-            "message": errors[0].message,
-            "path": list(errors[0].path),
+            "message": e0.message,
+            "path": list(e0.path),
         }
 
-    # In V1 we simply echo back as "normalized"
     return {"qa_status": "PASS", "normalized": payload}
 
 
 # -----------------------------
-# Mount MCP at /mcp (Streamable HTTP)
+# App wiring (Render-friendly)
 # -----------------------------
-# from starlette.middleware.trustedhost import TrustedHostMiddleware
-
-# # Create the MCP streamable HTTP ASGI app
-# inner_app = mcp.streamable_http_app()
-
-# # Apply TrustedHostMiddleware to the INNER app (most important)
-# inner_app.add_middleware(
-#     TrustedHostMiddleware,
-#     allowed_hosts=["*"],  # V1: allow all hosts to avoid Render host/header issues
-# )
-
-# @contextlib.asynccontextmanager
-# async def lifespan(app: Starlette):
-#     async with mcp.session_manager.run():
-#         yield
-
-# # Wrap with Starlette only to manage lifespan/session
-# app = Starlette(
-#     routes=[Mount("/", app=inner_app)],
-#     lifespan=lifespan,
-# )
-
-# # Also apply to OUTER app (belt-and-suspenders)
-# app.add_middleware(
-#     TrustedHostMiddleware,
-#     allowed_hosts=["*"],
-# )
-
-import contextlib
-from starlette.applications import Starlette
-from starlette.responses import PlainTextResponse
-from starlette.routing import Route, Mount
-from starlette.middleware.trustedhost import TrustedHostMiddleware
-
-# keep your existing: mcp = FastMCP(...), tool definition, lifespan manager, etc.
-
 def ping(request):
     return PlainTextResponse("pong-v1-mcp-server")
 
+
+# Create the MCP ASGI app, then wrap it with TrustedHostMiddleware (ASGI-safe)
 inner_app = mcp.streamable_http_app()
+inner_app = TrustedHostMiddleware(inner_app, allowed_hosts=["*"])
 
-from starlette.middleware.trustedhost import TrustedHostMiddleware
-
-inner_app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
 
 @contextlib.asynccontextmanager
 async def lifespan(app: Starlette):
+    # Ensures MCP session manager is active
     async with mcp.session_manager.run():
         yield
 
+
+# Mount MCP under /mcp AND /mcp/ to avoid trailing-slash issues
 app = Starlette(
     routes=[
         Route("/ping", ping),
         Mount("/mcp", app=inner_app),
-        Mount("/mcp/", app=inner_app),  # keep both so browser/clients don’t break
+        Mount("/mcp/", app=inner_app),
     ],
     lifespan=lifespan,
 )
 
-# Make host checks fully permissive for V1
+# Also allow all hosts at the outer layer (belt-and-suspenders)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
