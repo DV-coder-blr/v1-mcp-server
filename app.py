@@ -127,6 +127,10 @@ def ping(request):
 
 inner_app = mcp.streamable_http_app()
 
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+inner_app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
+
 @contextlib.asynccontextmanager
 async def lifespan(app: Starlette):
     async with mcp.session_manager.run():
